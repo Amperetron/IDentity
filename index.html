@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AICTE APAAR Admission &amp; Credential Platform | SIH26263 Demo</title>
+  <meta name="description" content="AICTE APAAR-based Unified Admission and Credential Platform with Simulated Permissioned Ledger and Sandbox Registry" />
+  
+  <!-- Modern Clean Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+
+  <!-- Core Stylesheet -->
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- Pinned CDN Libraries (cdnjs) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+  <!-- Government Header Top Bar (Tiranga Accent) -->
+  <div class="gov-topbar-accent">
+    <div class="accent-saffron"></div>
+    <div class="accent-white"></div>
+    <div class="accent-green"></div>
+  </div>
+
+  <!-- Government Branding Header -->
+  <header class="gov-header">
+    <div class="gov-container header-inner">
+      <div class="brand-group">
+        <div class="emblem-container">
+          <svg class="gov-emblem-svg" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="24" cy="24" r="22" stroke="#0B3C5D" stroke-width="2.5" fill="#F8FAFC"/>
+            <circle cx="24" cy="24" r="14" stroke="#D97706" stroke-width="2"/>
+            <path d="M24 10V38M10 24H38M14 14L34 34M14 34L34 14" stroke="#0B3C5D" stroke-width="1.5"/>
+            <circle cx="24" cy="24" r="4" fill="#0B3C5D"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <div class="brand-sup">Ministry of Education &amp; All India Council for Technical Education</div>
+          <h1 class="brand-title">APAAR Unified Admission &amp; Credential Platform</h1>
+          <div class="brand-sub">SIH26263 Demonstration Portal &bull; National Academic Bank of Credits</div>
+        </div>
+      </div>
+
+      <!-- System Architecture Labels & Indicators -->
+      <div class="header-badges">
+        <div class="badge-pill" title="Local mock APAAR registry without external network dependency">
+          <span class="badge-dot dot-cyan"></span>
+          <span class="badge-label">Sandbox adapter</span>
+        </div>
+        <div class="badge-pill" title="Cryptographic SHA-256 local hash chain persisted in localStorage">
+          <span class="badge-dot dot-green"></span>
+          <span class="badge-label">Simulated permissioned ledger</span>
+        </div>
+        <div id="global-ledger-status-badge" class="status-indicator status-valid">
+          ● Ledger: VERIFIED
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Navigation Tab Bar -->
+  <nav class="gov-nav">
+    <div class="gov-container nav-inner">
+      <ul class="nav-tabs" role="tablist">
+        <li role="presentation">
+          <button class="nav-tab-btn active" data-tab="tab-dashboard" role="tab">
+            <svg class="tab-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+            Dashboard
+          </button>
+        </li>
+        <li role="presentation">
+          <button class="nav-tab-btn" data-tab="tab-upload" role="tab">
+            <svg class="tab-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            Bulk Admissions
+          </button>
+        </li>
+        <li role="presentation">
+          <button class="nav-tab-btn" data-tab="tab-certs" role="tab">
+            <svg class="tab-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+            </svg>
+            Issue Credentials
+          </button>
+        </li>
+        <li role="presentation">
+          <button class="nav-tab-btn" data-tab="tab-verify" role="tab">
+            <svg class="tab-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+            </svg>
+            Verify Credential
+          </button>
+        </li>
+        <li role="presentation">
+          <button class="nav-tab-btn" data-tab="tab-query" role="tab">
+            <svg class="tab-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+            </svg>
+            Natural Language Query
+          </button>
+        </li>
+        <li role="presentation">
+          <button class="nav-tab-btn" data-tab="tab-ledger" role="tab">
+            <svg class="tab-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+            </svg>
+            Ledger Explorer
+          </button>
+        </li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- Main Content Area Containers (Strict Shared Contract IDs) -->
+  <main class="gov-container main-content">
+    <!-- Tab 1: Dashboard (#tab-dashboard) -->
+    <section id="tab-dashboard" class="tab-pane active" role="tabpanel">
+      <div class="gov-card text-center py-12">
+        <div class="spinner-gov"></div>
+        <h3 class="text-lg font-bold text-gov-navy mt-4">Loading Executive Dashboard...</h3>
+        <p class="text-sm text-gov-muted mt-1">Initializing state analytics, capacity compliance tables, and anomaly detection engine.</p>
+      </div>
+    </section>
+
+    <!-- Tab 2: Upload (#tab-upload) -->
+    <section id="tab-upload" class="tab-pane" role="tabpanel">
+      <!-- Injected dynamically by Upload.init() -->
+    </section>
+
+    <!-- Tab 3: Certs (#tab-certs) -->
+    <section id="tab-certs" class="tab-pane" role="tabpanel">
+      <div class="gov-card text-center py-12">
+        <h3 class="text-lg font-bold text-gov-navy">Digital Credential Issuance</h3>
+        <p class="text-sm text-gov-muted mt-1">Waiting for credentials module (certs.js) to initialize...</p>
+      </div>
+    </section>
+
+    <!-- Tab 4: Verify (#tab-verify) -->
+    <section id="tab-verify" class="tab-pane" role="tabpanel">
+      <div class="gov-card text-center py-12">
+        <h3 class="text-lg font-bold text-gov-navy">Credential Verification Portal</h3>
+        <p class="text-sm text-gov-muted mt-1">Waiting for verification module to initialize...</p>
+      </div>
+    </section>
+
+    <!-- Tab 5: Query (#tab-query) -->
+    <section id="tab-query" class="tab-pane" role="tabpanel">
+      <div class="gov-card text-center py-12">
+        <h3 class="text-lg font-bold text-gov-navy">AICTE Policy Intelligence Query</h3>
+        <p class="text-sm text-gov-muted mt-1">Waiting for natural language query engine (nlquery.js) to initialize...</p>
+      </div>
+    </section>
+
+    <!-- Tab 6: Ledger Explorer (#tab-ledger) -->
+    <section id="tab-ledger" class="tab-pane" role="tabpanel">
+      <!-- Injected dynamically by app.js renderLedgerTab() -->
+    </section>
+  </main>
+
+  <!-- Government Footer -->
+  <footer class="gov-footer mt-12">
+    <div class="gov-container footer-inner">
+      <div class="footer-col">
+        <div class="footer-title">All India Council for Technical Education (AICTE)</div>
+        <p class="footer-desc">
+          Nelson Mandela Marg, Vasant Kunj, New Delhi - 110070 &bull;
+          Smart India Hackathon SIH26263 Demonstration Environment.
+        </p>
+      </div>
+      <div class="footer-col text-right">
+        <div class="footer-badge">Offline-First Architecture</div>
+        <div class="footer-sub">Zero external API dependencies &bull; 100% Client-Side Execution</div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Scripts: Core Foundation (Agent A) -->
+  <script src="data.js"></script>
+  <script src="ledger.js"></script>
+  <script src="rules.js"></script>
+  <script src="upload.js"></script>
+
+  <!-- Scripts: Specialized Analytics & Cryptography (Agent B) -->
+  <script src="certs.js"></script>
+  <script src="anomalies.js"></script>
+  <script src="dashboard.js"></script>
+  <script src="nlquery.js"></script>
+
+  <!-- Application Bootstrap (Agent A) -->
+  <script src="app.js"></script>
+</body>
+</html>
