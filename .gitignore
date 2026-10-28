@@ -1,0 +1,16 @@
+# secrets and local env
+.env
+.env.*
+.vercel
+*.pem
+*.key
+
+# dependencies and build junk
+node_modules/
+.DS_Store
+*.log
+
+# editor/agent scratch
+.opencode/
+.agent/
+*.swp
