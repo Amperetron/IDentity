@@ -3,16 +3,17 @@
  * Agent B - Shared Contract: window.Certs
  *
  * Capabilities:
+ * - Direct integration with window.Ledger and window.SEED
  * - ECDSA P-256 keypair generation and persistence via crypto.subtle & localStorage
  * - issue(apaarId): Signs certificate, commits "CERTIFICATE" block to Ledger, renders QR code
  * - verify(qrText): Cryptographic signature verification, sandbox check, ledger check
- * - Renders #tab-certs (issuance) and #tab-verify (verification)
+ * - Renders #tab-certs (issuance) and #tab-verify (verification) with style.css gov theme
  */
 
 (function () {
   'use strict';
 
-  // Fallback / Adapter for environment independence
+  // Safe accessor for window.Ledger
   function getLedger() {
     return window.Ledger || {
       getChain: () => [],
@@ -156,9 +157,9 @@
     }
 
     // Lookup sandbox APAAR profile
-    const apaarProfile = seed.apaar.find(a => String(a.apaarId) === String(apaarId));
-    const collegeId = admission ? admission.collegeId : (seed.colleges[0] ? seed.colleges[0].id : 'COL001');
-    const college = seed.colleges.find(c => c.id === collegeId);
+    const apaarProfile = seed.apaar ? seed.apaar.find(a => String(a.apaarId) === String(apaarId)) : null;
+    const collegeId = admission ? admission.collegeId : (seed.colleges && seed.colleges[0] ? seed.colleges[0].id : 'COL001');
+    const college = seed.colleges ? seed.colleges.find(c => c.id === collegeId) : null;
 
     const name = (admission && admission.name) || (apaarProfile && apaarProfile.name) || 'Student ' + String(apaarId).slice(-4);
     const rollNo = (admission && admission.rollNo) || 'ROLL-' + String(apaarId).slice(-4);
@@ -170,7 +171,7 @@
       rollNo,
       college: collegeName,
       collegeId,
-      hasAdmission: !admission && !isCancelled
+      hasAdmission: Boolean(admission && !isCancelled)
     };
   }
 
@@ -212,7 +213,7 @@
       publicKeyJwk: keys.publicKeyJwk
     };
 
-    // Commit to simulated ledger
+    // Commit to simulated ledger via window.Ledger.addBlock
     const ledger = getLedger();
     let block = null;
     if (typeof ledger.addBlock === 'function') {
@@ -376,7 +377,7 @@
           text: text,
           width: 170,
           height: 170,
-          colorDark: '#0f2942',
+          colorDark: '#0B3C5D',
           colorLight: '#ffffff',
           correctLevel: window.QRCode.CorrectLevel ? window.QRCode.CorrectLevel.M : 0
         });
@@ -391,7 +392,7 @@
     const size = 21;
     let svg = '<svg viewBox="0 0 ' + size + ' ' + size + '" width="170" height="170" style="background:#fff;border-radius:4px;border:1px solid #cbd5e1;" xmlns="http://www.w3.org/2000/svg">';
     // Finder patterns
-    const drawFinder = (x, y) => '<rect x="' + x + '" y="' + y + '" width="7" height="7" fill="#0f2942"/><rect x="' + (x + 1) + '" y="' + (y + 1) + '" width="5" height="5" fill="#ffffff"/><rect x="' + (x + 2) + '" y="' + (y + 2) + '" width="3" height="3" fill="#0f2942"/>';
+    const drawFinder = (x, y) => '<rect x="' + x + '" y="' + y + '" width="7" height="7" fill="#0B3C5D"/><rect x="' + (x + 1) + '" y="' + (y + 1) + '" width="5" height="5" fill="#ffffff"/><rect x="' + (x + 2) + '" y="' + (y + 2) + '" width="3" height="3" fill="#0B3C5D"/>';
     svg += drawFinder(0, 0);
     svg += drawFinder(size - 7, 0);
     svg += drawFinder(0, size - 7);
@@ -403,7 +404,7 @@
         if ((r < 8 && c < 8) || (r < 8 && c >= size - 8) || (r >= size - 8 && c < 8)) continue;
         const bit = ((hashNum ^ (r * 13 + c * 17)) + (text.charCodeAt((r + c) % text.length) || 0)) % 3 === 0;
         if (bit) {
-          svg += '<rect x="' + c + '" y="' + r + '" width="1" height="1" fill="#0f2942"/>';
+          svg += '<rect x="' + c + '" y="' + r + '" width="1" height="1" fill="#0B3C5D"/>';
         }
       }
     }
@@ -432,7 +433,7 @@
       if (block.type === 'ADMISSION' && block.data && block.data.apaarId) {
         const id = String(block.data.apaarId);
         if (!cancelledMap.has(id) && !admittedStudents.some(s => String(s.apaarId) === id)) {
-          const college = seed.colleges.find(c => c.id === block.data.collegeId);
+          const college = seed.colleges ? seed.colleges.find(c => c.id === block.data.collegeId) : null;
           admittedStudents.push({
             apaarId: id,
             name: block.data.name,
@@ -447,7 +448,7 @@
     // Fallback if no admissions yet
     if (admittedStudents.length === 0 && seed.apaar && seed.apaar.length > 0) {
       seed.apaar.slice(0, 5).forEach((stu, idx) => {
-        const col = (seed.colleges && seed.colleges[idx % seed.colleges.length]) || { id: 'COL001', name: 'IIT Bombay' };
+        const col = (seed.colleges && seed.colleges[idx % seed.colleges.length]) || { id: 'COL001', name: 'COEP Technological University, Pune' };
         admittedStudents.push({
           apaarId: String(stu.apaarId),
           name: stu.name,
@@ -473,34 +474,33 @@
     });
 
     container.innerHTML = `
-      <div class="certs-module" style="max-width: 1000px; margin: 0 auto; padding: 10px;">
-        <div style="background: linear-gradient(135deg, #0f2942 0%, #1e4976 100%); color: #fff; padding: 20px; border-radius: 8px; margin-bottom: 24px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-            <div>
-              <h2 style="margin: 0; font-size: 1.4rem; font-weight: 700;">AICTE Digital Credential Issuance Engine</h2>
-              <p style="margin: 6px 0 0; opacity: 0.9; font-size: 0.9rem;">
-                National APAAR Identity • ECDSA P-256 Asymmetric Cryptographic Signing • Simulated Permissioned Ledger
-              </p>
-            </div>
-            <div style="display: flex; gap: 8px;">
-              <span style="background: #2563eb; color: #fff; padding: 4px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">ECDSA P-256</span>
-              <span style="background: #059669; color: #fff; padding: 4px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">SHA-256 Ledger</span>
-            </div>
+      <div class="gov-card">
+        <div class="gov-card-header">
+          <div>
+            <div class="brand-sup">AICTE National Credentialing Engine</div>
+            <h2 class="gov-card-title mt-1">Digital Credential Issuance Authority</h2>
+            <p class="gov-card-subtitle">
+              Issue tamper-proof academic credentials cryptographically signed using <strong>ECDSA P-256</strong> and permanently committed as a <code>CERTIFICATE</code> block to the <strong>Simulated permissioned ledger</strong>.
+            </p>
+          </div>
+          <div class="header-action-pills">
+            <span class="badge badge-gov font-mono">ECDSA P-256</span>
+            <span class="badge badge-success font-mono">SHA-256 Chain</span>
           </div>
         </div>
 
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px;">
           <!-- Left: Selection & Issuance Form -->
-          <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-            <h3 style="margin-top: 0; color: #0f2942; font-size: 1.1rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">
+          <div class="results-card">
+            <h3 class="text-lg font-bold text-gov-navy" style="margin-bottom: 12px; border-bottom: 2px solid var(--border-color); padding-bottom: 8px;">
               Select Admitted Student
             </h3>
             
             <div style="margin-bottom: 16px;">
-              <label style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 6px; color: #334155;">
+              <label class="text-xs font-semibold text-gov-navy" style="display: block; margin-bottom: 6px;">
                 Select from Active Ledger Admissions:
               </label>
-              <select id="cert-student-select" style="width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; background: #f8fafc;">
+              <select id="cert-student-select" class="form-select" style="width: 100%; padding: 8px 10px;">
                 ${admittedStudents.map(s => `
                   <option value="${s.apaarId}">
                     ${s.name} (${s.apaarId}) - ${s.collegeName}
@@ -510,76 +510,79 @@
             </div>
 
             <div style="margin-bottom: 16px;">
-              <label style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 6px; color: #334155;">
+              <label class="text-xs font-semibold text-gov-navy" style="display: block; margin-bottom: 6px;">
                 Or Enter 12-digit Sandbox APAAR ID:
               </label>
-              <input type="text" id="cert-manual-apaar" placeholder="e.g. 123456789012" maxlength="12" style="width: 100%; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; box-sizing: border-box;" />
+              <input type="text" id="cert-manual-apaar" placeholder="e.g. 987654320001" maxlength="12" class="form-select font-mono" style="width: 100%; padding: 8px 10px;" />
             </div>
 
-            <div id="cert-preview-meta" style="background: #f1f5f9; border-left: 4px solid #0f2942; padding: 12px; border-radius: 4px; margin-bottom: 20px; font-size: 0.85rem; line-height: 1.5;">
-              <div><strong>Status:</strong> <span style="color:#059669; font-weight:600;">Verified Admitted Student</span></div>
-              <div><strong>Roll No:</strong> <span id="meta-roll">${admittedStudents[0] ? admittedStudents[0].rollNo : '-'}</span></div>
-              <div><strong>College:</strong> <span id="meta-college">${admittedStudents[0] ? admittedStudents[0].collegeName : '-'}</span></div>
+            <div id="cert-preview-meta" class="alert alert-success" style="padding: 10px 14px; margin-bottom: 16px; font-size: 0.85rem;">
+              <div><strong>Status:</strong> <span class="badge badge-success">Active Ledger Admission</span></div>
+              <div style="margin-top: 4px;"><strong>Roll No:</strong> <span id="meta-roll" class="font-mono">${admittedStudents[0] ? admittedStudents[0].rollNo : '-'}</span></div>
+              <div style="margin-top: 2px;"><strong>College:</strong> <span id="meta-college">${admittedStudents[0] ? admittedStudents[0].collegeName : '-'}</span></div>
             </div>
 
-            <button id="btn-issue-cert" style="width: 100%; padding: 12px; background: #0f2942; color: #ffffff; border: none; border-radius: 6px; font-weight: 700; font-size: 0.95rem; cursor: pointer; transition: background 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;">
-              <span>Sign & Issue Credential (ECDSA)</span>
+            <button id="btn-issue-cert" class="btn btn-primary" style="width: 100%; padding: 10px; font-size: 0.95rem;">
+              Sign &amp; Issue Credential (ECDSA)
             </button>
-            <p style="margin: 8px 0 0; font-size: 0.75rem; color: #64748b; text-align: center;">
-              Writes a tamper-proof "CERTIFICATE" block to the simulated ledger.
+            <p class="text-xs text-gov-muted text-center mt-2">
+              Signs hash with ECDSA P-256 and commits a "CERTIFICATE" block to the ledger.
             </p>
           </div>
 
           <!-- Right: Live Credential & QR Output -->
-          <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-            <h3 style="margin-top: 0; color: #0f2942; font-size: 1.1rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">
-              Issued Credential Display
+          <div class="results-card">
+            <h3 class="text-lg font-bold text-gov-navy" style="margin-bottom: 12px; border-bottom: 2px solid var(--border-color); padding-bottom: 8px;">
+              Verifiable Credential Card
             </h3>
             
-            <div id="cert-card-output" style="text-align: center; color: #64748b; padding: 20px 0;">
-              <div style="border: 2px dashed #cbd5e1; border-radius: 8px; padding: 30px 20px;">
-                <p style="margin: 0; font-size: 0.95rem;">Select an admitted student and click <strong>"Sign & Issue Credential"</strong>.</p>
-                <p style="margin: 6px 0 0; font-size: 0.8rem; color: #94a3b8;">The signed verifiable credential and scannable QR code will render here.</p>
+            <div id="cert-card-output" style="text-align: center; color: var(--text-muted); padding: 16px 0;">
+              <div style="border: 2px dashed #CBD5E1; border-radius: var(--radius-md); padding: 30px 20px;">
+                <p style="font-size: 0.95rem; font-weight: 600;">Ready to Issue Credential</p>
+                <p class="text-xs text-gov-muted mt-1">Select an admitted candidate and click <strong>"Sign &amp; Issue Credential"</strong>.</p>
               </div>
             </div>
           </div>
         </div>
 
         <!-- Bottom: Certificate History from Ledger -->
-        <div style="margin-top: 30px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
-            <h3 style="margin: 0; color: #0f2942; font-size: 1.1rem;">
-              Ledger Recorded Certificates (${issuedCerts.length})
-            </h3>
-            <span style="font-size: 0.8rem; color: #64748b;">Anchored on simulated permissioned ledger</span>
+        <div class="mt-6">
+          <div class="gov-card-header" style="margin-bottom: 12px;">
+            <div>
+              <h3 class="gov-card-title" style="font-size: 1.1rem;">
+                Ledger Recorded Certificates (${issuedCerts.length})
+              </h3>
+              <p class="gov-card-subtitle">Cryptographic proof records anchored in simulated permissioned ledger</p>
+            </div>
+            <span class="badge badge-gov font-mono">Immutable Log</span>
           </div>
 
-          <div style="overflow-x: auto;">
-            <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
+          <div class="table-responsive">
+            <table class="data-table">
               <thead>
-                <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0; color: #475569;">
-                  <th style="padding: 10px;">Block #</th>
-                  <th style="padding: 10px;">APAAR ID</th>
-                  <th style="padding: 10px;">Student Name</th>
-                  <th style="padding: 10px;">Institution</th>
-                  <th style="padding: 10px;">Issued At</th>
-                  <th style="padding: 10px;">Digest</th>
-                  <th style="padding: 10px; text-align: center;">Action</th>
+                <tr>
+                  <th style="width: 80px;">Block #</th>
+                  <th>APAAR ID</th>
+                  <th>Candidate Name</th>
+                  <th>Institution</th>
+                  <th>Issued At</th>
+                  <th>Digest</th>
+                  <th style="text-align: center; width: 100px;">Action</th>
                 </tr>
               </thead>
               <tbody id="cert-history-tbody">
                 ${issuedCerts.length === 0 ? `
-                  <tr><td colspan="7" style="padding: 16px; text-align: center; color: #94a3b8;">No certificates issued on ledger yet.</td></tr>
+                  <tr><td colspan="7" class="text-center py-6 text-gov-muted">No certificates issued on ledger yet.</td></tr>
                 ` : issuedCerts.map(c => `
-                  <tr style="border-bottom: 1px solid #f1f5f9;">
-                    <td style="padding: 10px; font-weight: 600; color: #0f2942;">#${c.blockIndex}</td>
-                    <td style="padding: 10px; font-family: monospace;">${c.payload.apaarId}</td>
-                    <td style="padding: 10px; font-weight: 600;">${c.payload.name}</td>
-                    <td style="padding: 10px;">${c.payload.college}</td>
-                    <td style="padding: 10px; color: #64748b;">${new Date(c.payload.issuedAt || c.timestamp).toLocaleString()}</td>
-                    <td style="padding: 10px; font-family: monospace; font-size: 0.75rem;">${(c.hash || '').slice(0, 10)}...</td>
-                    <td style="padding: 10px; text-align: center;">
-                      <button class="btn-quick-verify" data-cert='${JSON.stringify({ payload: c.payload, signature: c.signature })}' style="background: #2563eb; color: #fff; border: none; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; cursor: pointer;">
+                  <tr>
+                    <td class="font-mono font-bold text-gov-navy">#${c.blockIndex}</td>
+                    <td class="font-mono text-xs font-semibold">${c.payload.apaarId}</td>
+                    <td style="font-weight: 600;">${c.payload.name}</td>
+                    <td>${c.payload.college}</td>
+                    <td class="text-xs text-gov-muted">${new Date(c.payload.issuedAt || c.timestamp).toLocaleString()}</td>
+                    <td class="font-mono text-xs">${(c.hash || '').slice(0, 10)}...</td>
+                    <td style="text-align: center;">
+                      <button class="btn btn-outline btn-xs btn-quick-verify" data-cert='${JSON.stringify({ payload: c.payload, signature: c.signature })}'>
                         Verify
                       </button>
                     </td>
@@ -602,8 +605,8 @@
     function updateMeta(id) {
       const stu = admittedStudents.find(s => String(s.apaarId) === String(id)) || findStudentInfo(id);
       if (stu) {
-        metaRoll.textContent = stu.rollNo || 'N/A';
-        metaCollege.textContent = stu.collegeName || stu.college || 'N/A';
+        if (metaRoll) metaRoll.textContent = stu.rollNo || 'N/A';
+        if (metaCollege) metaCollege.textContent = stu.collegeName || stu.college || 'N/A';
       }
     }
 
@@ -636,7 +639,7 @@
         try {
           const result = await issue(chosenId);
           renderIssuedCard(result);
-          // Refresh list
+          // Refresh table
           renderCertsTab();
         } catch (err) {
           alert('Error issuing certificate: ' + err.message);
@@ -666,43 +669,50 @@
     const { payload, signature, hash, block } = result;
 
     cardContainer.innerHTML = `
-      <div style="border: 2px solid #0f2942; border-radius: 8px; padding: 16px; background: #ffffff; text-align: left; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
-        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0f2942; padding-bottom: 8px; margin-bottom: 12px;">
+      <div style="border: 2px solid var(--gov-navy); border-radius: var(--radius-md); padding: 16px; background: #ffffff; text-align: left; box-shadow: var(--shadow-md);">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--gov-navy); padding-bottom: 8px; margin-bottom: 12px;">
           <div>
-            <div style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: #b45309; letter-spacing: 0.5px;">All India Council for Technical Education</div>
-            <div style="font-size: 1.1rem; font-weight: 800; color: #0f2942;">Verified Academic Credential</div>
+            <div style="font-size: 0.72rem; text-transform: uppercase; font-weight: 700; color: var(--gov-saffron); letter-spacing: 0.5px;">All India Council for Technical Education</div>
+            <div style="font-size: 1.05rem; font-weight: 800; color: var(--gov-navy-dark);">Verified Academic Credential</div>
           </div>
-          <span style="background: #059669; color: #fff; font-size: 0.7rem; font-weight: 700; padding: 3px 8px; border-radius: 4px;">LEDGER COMMITTED</span>
+          <span class="badge badge-success font-mono">LEDGER ANCHORED</span>
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center;">
-          <div style="font-size: 0.85rem; line-height: 1.6; color: #1e293b;">
-            <div><strong style="color: #64748b;">Candidate Name:</strong> <span style="font-weight: 700; font-size: 1rem; color: #0f2942;">${payload.name}</span></div>
-            <div><strong style="color: #64748b;">APAAR ID:</strong> <span style="font-family: monospace; font-weight: 600;">${payload.apaarId}</span></div>
-            <div><strong style="color: #64748b;">Roll No:</strong> <span style="font-family: monospace;">${payload.rollNo}</span></div>
-            <div><strong style="color: #64748b;">Institution:</strong> <span>${payload.college}</span></div>
-            <div><strong style="color: #64748b;">Issued At:</strong> <span>${new Date(payload.issuedAt).toLocaleString()}</span></div>
-            ${block ? `<div><strong style="color: #64748b;">Ledger Anchor:</strong> <span style="color: #059669; font-weight: 600;">Block #${block.index}</span></div>` : ''}
+          <div style="font-size: 0.85rem; line-height: 1.6; color: var(--text-main);">
+            <div><strong style="color: var(--text-muted);">Candidate:</strong> <span style="font-weight: 700; font-size: 0.95rem; color: var(--gov-navy-dark);">${payload.name}</span></div>
+            <div><strong style="color: var(--text-muted);">APAAR ID:</strong> <span class="font-mono" style="font-weight: 600;">${payload.apaarId}</span></div>
+            <div><strong style="color: var(--text-muted);">Roll No:</strong> <span class="font-mono">${payload.rollNo}</span></div>
+            <div><strong style="color: var(--text-muted);">Institution:</strong> <span>${payload.college}</span></div>
+            <div><strong style="color: var(--text-muted);">Issued At:</strong> <span>${new Date(payload.issuedAt).toLocaleString()}</span></div>
+            ${block ? `<div><strong style="color: var(--text-muted);">Ledger Anchor:</strong> <span class="font-mono text-gov-navy font-bold">Block #${block.index}</span></div>` : ''}
           </div>
 
           <div style="text-align: center;">
             <div id="issued-qr-box" style="display: inline-block;"></div>
-            <div style="font-size: 0.7rem; color: #64748b; margin-top: 4px;">ECDSA QR Code</div>
+            <div class="text-xs text-gov-muted mt-1 font-mono">ECDSA QR Code</div>
           </div>
         </div>
 
-        <div style="margin-top: 12px; padding: 8px; background: #f8fafc; border-radius: 4px; font-family: monospace; font-size: 0.7rem; color: #475569; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-          <strong>SHA-256 Digest:</strong> ${hash}<br/>
-          <strong>ECDSA Signature:</strong> ${signature.slice(0, 48)}...
+        <div class="alert alert-success mt-3" style="padding: 8px; font-size: 0.7rem; margin-bottom: 0;">
+          <div class="font-mono" style="word-break: break-all;"><strong>SHA-256 Digest:</strong> ${hash}</div>
+          <div class="font-mono mt-1" style="word-break: break-all;"><strong>Signature:</strong> ${signature.slice(0, 52)}...</div>
         </div>
 
         <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
-          <button id="btn-copy-cert-json" style="flex: 1; padding: 8px; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.8rem; font-weight: 600; cursor: pointer;">
+          <button id="btn-copy-cert-json" class="btn btn-outline btn-sm" style="flex: 1;">
             📋 Copy JSON
           </button>
-          <button id="btn-goto-verify" style="flex: 1; padding: 8px; background: #2563eb; color: #fff; border: none; border-radius: 4px; font-size: 0.8rem; font-weight: 600; cursor: pointer;">
-            🔍 Verify this Credential
+          <button id="btn-goto-verify" class="btn btn-primary btn-sm" style="flex: 1;">
+            🔍 Verify Credential
           </button>
+        </div>
+
+        <div style="margin-top: 8px;">
+          <button id="btn-anchor-cert-onchain" class="btn btn-warning btn-sm" style="width: 100%; font-size: 0.85rem;">
+            ⛓️ Anchor this certificate hash on-chain
+          </button>
+          <div id="cert-anchor-feedback" style="display: none; margin-top: 8px;"></div>
         </div>
       </div>
     `;
@@ -727,20 +737,83 @@
         switchToVerifyWithData(JSON.stringify({ payload, signature }, null, 2));
       });
     }
+
+    const btnAnchorCert = document.getElementById('btn-anchor-cert-onchain');
+    const feedbackBox = document.getElementById('cert-anchor-feedback');
+    if (btnAnchorCert) {
+      btnAnchorCert.addEventListener('click', async () => {
+        btnAnchorCert.disabled = true;
+        btnAnchorCert.textContent = 'Submitting on-chain anchor...';
+        if (feedbackBox) {
+          feedbackBox.style.display = 'block';
+          feedbackBox.innerHTML = '<div class="alert alert-gov font-mono text-xs">Connecting to MetaMask & submitting transaction on Sepolia...</div>';
+        }
+
+        if (!window.Anchor) {
+          if (feedbackBox) {
+            feedbackBox.innerHTML = '<div class="alert alert-warning text-xs">Anchor module (anchor.js) is not available.</div>';
+          }
+          btnAnchorCert.disabled = false;
+          btnAnchorCert.textContent = '⛓️ Anchor this certificate hash on-chain';
+          return;
+        }
+
+        try {
+          const res = await window.Anchor.anchorNow(hash);
+          if (res.success) {
+            if (feedbackBox) {
+              feedbackBox.innerHTML = `
+                <div class="alert alert-success text-xs" style="padding: 10px; border: 2px solid var(--color-success);">
+                  <div>✔ <strong>Certificate Hash Anchored on Sepolia!</strong></div>
+                  <div class="font-mono mt-1" style="word-break: break-all;">Digest: ${res.root}</div>
+                  <div class="mt-2">
+                    <a href="${res.explorerUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-xs font-mono" style="text-decoration: none;">
+                      View on Sepolia Etherscan ↗
+                    </a>
+                  </div>
+                </div>
+              `;
+            }
+          } else {
+            if (feedbackBox) {
+              feedbackBox.innerHTML = `
+                <div class="alert alert-warning text-xs" style="padding: 10px;">
+                  ⚠️ <strong>On-Chain Notice:</strong> ${res.message}
+                </div>
+              `;
+            }
+          }
+        } catch (err) {
+          if (feedbackBox) {
+            feedbackBox.innerHTML = `
+              <div class="alert alert-danger text-xs" style="padding: 10px;">
+                ❌ Error: ${err.message}
+              </div>
+            `;
+          }
+        } finally {
+          btnAnchorCert.disabled = false;
+          btnAnchorCert.textContent = '⛓️ Anchor this certificate hash on-chain';
+        }
+      });
+    }
   }
 
   /**
    * Switch to #tab-verify and inject data
    */
   function switchToVerifyWithData(jsonString) {
-    const verifyTabBtn = document.querySelector('[data-tab="tab-verify"], #nav-verify, a[href="#tab-verify"]');
-    if (verifyTabBtn) {
-      verifyTabBtn.click();
+    if (window.App && typeof window.App.switchTab === 'function') {
+      window.App.switchTab('tab-verify');
     } else {
-      // Direct tab activation fallback
-      document.querySelectorAll('[id^="tab-"]').forEach(el => el.style.display = 'none');
-      const vTab = document.getElementById('tab-verify');
-      if (vTab) vTab.style.display = 'block';
+      const verifyTabBtn = document.querySelector('[data-tab="tab-verify"], #nav-verify, a[href="#tab-verify"]');
+      if (verifyTabBtn) {
+        verifyTabBtn.click();
+      } else {
+        document.querySelectorAll('[id^="tab-"]').forEach(el => el.style.display = 'none');
+        const vTab = document.getElementById('tab-verify');
+        if (vTab) vTab.style.display = 'block';
+      }
     }
 
     setTimeout(() => {
@@ -761,38 +834,45 @@
     if (!container) return;
 
     container.innerHTML = `
-      <div class="verify-module" style="max-width: 900px; margin: 0 auto; padding: 10px;">
-        <div style="background: linear-gradient(135deg, #0f2942 0%, #1e4976 100%); color: #fff; padding: 20px; border-radius: 8px; margin-bottom: 24px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-          <h2 style="margin: 0; font-size: 1.4rem; font-weight: 700;">AICTE Credential Verification Portal</h2>
-          <p style="margin: 6px 0 0; opacity: 0.9; font-size: 0.9rem;">
-            Instant Offline & Cryptographic Verification against Sandbox APAAR Registry & Simulated Permissioned Ledger
-          </p>
+      <div class="gov-card">
+        <div class="gov-card-header">
+          <div>
+            <div class="brand-sup">Universal Credential Verification</div>
+            <h2 class="gov-card-title mt-1">Academic Credential Verification Portal</h2>
+            <p class="gov-card-subtitle">
+              Verify institutional certificates offline or online. Checks <strong>ECDSA P-256</strong> asymmetric signature, <strong>Sandbox APAAR Registry</strong> existence, and <strong>Simulated permissioned ledger</strong> block anchor.
+            </p>
+          </div>
+          <div class="header-action-pills">
+            <span class="badge badge-gov font-mono">Zero-Knowledge</span>
+            <span class="badge badge-info">Multi-Check</span>
+          </div>
         </div>
 
-        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 24px;">
-          <label style="display: block; font-weight: 700; font-size: 0.95rem; margin-bottom: 8px; color: #0f2942;">
-            Paste Scanned QR Payload or Certificate JSON:
+        <div class="results-card mb-6">
+          <label class="text-sm font-bold text-gov-navy" style="display: block; margin-bottom: 8px;">
+            Paste Scanned QR Code Text or Certificate JSON:
           </label>
-          <textarea id="verify-input-payload" rows="6" placeholder='{"payload": {"apaarId": "...", "name": "...", "college": "..."}, "signature": "..."}' style="width: 100%; padding: 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-family: monospace; font-size: 0.85rem; box-sizing: border-box; background: #f8fafc;"></textarea>
+          <textarea id="verify-input-payload" class="code-textarea" rows="6" placeholder='{"payload": {"apaarId": "...", "name": "...", "college": "..."}, "signature": "..."}'></textarea>
 
           <!-- Quick Test Presets -->
           <div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">
-            <button id="btn-preset-valid" style="padding: 6px 12px; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; border-radius: 4px; font-size: 0.8rem; font-weight: 600; cursor: pointer;">
+            <button id="btn-preset-valid" class="btn btn-outline btn-sm">
               📋 Paste Last Issued Cert
             </button>
-            <button id="btn-preset-tampered" style="padding: 6px 12px; background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; border-radius: 4px; font-size: 0.8rem; font-weight: 600; cursor: pointer;">
+            <button id="btn-preset-tampered" class="btn btn-danger btn-sm">
               ⚠️ Test Tampered Data (Name Altered)
             </button>
-            <button id="btn-preset-forged" style="padding: 6px 12px; background: #fef3c7; color: #b45309; border: 1px solid #fde68a; border-radius: 4px; font-size: 0.8rem; font-weight: 600; cursor: pointer;">
+            <button id="btn-preset-forged" class="btn btn-warning btn-sm">
               🚫 Test Forged Signature
             </button>
-            <button id="btn-preset-clear" style="padding: 6px 12px; background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.8rem; font-weight: 600; cursor: pointer;">
+            <button id="btn-preset-clear" class="btn btn-outline btn-sm">
               🧹 Clear
             </button>
           </div>
 
-          <div style="margin-top: 16px;">
-            <button id="btn-run-verify" style="width: 100%; padding: 12px; background: #059669; color: #ffffff; border: none; border-radius: 6px; font-weight: 700; font-size: 1rem; cursor: pointer; transition: background 0.2s;">
+          <div class="mt-4">
+            <button id="btn-run-verify" class="btn btn-primary" style="width: 100%; padding: 10px; font-size: 1rem;">
               Verify Credential Authenticity
             </button>
           </div>
@@ -869,16 +949,16 @@
         if (!sample) {
           sample = {
             payload: {
-              apaarId: '100000000001',
-              name: 'Original Student',
-              college: 'IIT Bombay',
-              rollNo: 'ROLL-1001',
+              apaarId: '987654320001',
+              name: 'Original Candidate',
+              college: 'COEP Technological University, Pune',
+              rollNo: 'COEP-2026-CS01',
               issuedAt: new Date().toISOString()
             },
             signature: 'tampered_signature_bytes_base64_demo'
           };
         }
-        // Tamper the payload: change name while preserving signature
+        // Tamper the payload: change candidate name while preserving original signature
         const tamperedPayload = Object.assign({}, sample.payload, {
           name: 'MALICIOUS_IMPOSTOR (Tampered)'
         });
@@ -894,7 +974,7 @@
         inputArea.value = JSON.stringify({
           payload: {
             apaarId: '999999999999',
-            name: 'Unauthorized Student',
+            name: 'Unauthorized Candidate',
             college: 'Fake Technical Institute',
             rollNo: 'ROLL-FAKE',
             issuedAt: new Date().toISOString()
@@ -923,48 +1003,48 @@
     const cert = outcome.cert || {};
 
     container.innerHTML = `
-      <div style="border: 2px solid ${isValid ? '#059669' : '#dc2626'}; border-radius: 8px; background: #ffffff; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.06);">
+      <div class="results-card" style="border: 2px solid ${isValid ? 'var(--gov-green)' : 'var(--color-danger)'};">
         <!-- Top Status Banner -->
-        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0;">
-          <div style="width: 48px; height: 48px; border-radius: 50%; background: ${isValid ? '#dcfce7' : '#fee2e2'}; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; color: ${isValid ? '#059669' : '#dc2626'}; flex-shrink: 0;">
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border-color);">
+          <div style="width: 44px; height: 44px; border-radius: 50%; background: ${isValid ? 'var(--color-success-bg)' : 'var(--color-danger-bg)'}; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; color: ${isValid ? 'var(--color-success)' : 'var(--color-danger)'}; flex-shrink: 0;">
             ${isValid ? '✔' : '✖'}
           </div>
           <div>
-            <h3 style="margin: 0; font-size: 1.25rem; color: ${isValid ? '#059669' : '#dc2626'};">
-              ${isValid ? 'AUTHENTIC & VERIFIED CREDENTIAL' : 'VERIFICATION FAILED / INVALID CREDENTIAL'}
+            <h3 style="margin: 0; font-size: 1.2rem; color: ${isValid ? 'var(--color-success)' : 'var(--color-danger)'};">
+              ${isValid ? 'AUTHENTIC &amp; VERIFIED CREDENTIAL' : 'VERIFICATION FAILED / INVALID CREDENTIAL'}
             </h3>
-            <p style="margin: 4px 0 0; color: #475569; font-size: 0.9rem;">
+            <p class="text-xs text-gov-muted mt-1">
               ${outcome.reason}
             </p>
           </div>
         </div>
 
         <!-- 4-Point Cryptographic & Policy Checklist -->
-        <div style="background: #f8fafc; border-radius: 6px; padding: 14px; margin-bottom: 16px;">
-          <div style="font-weight: 700; font-size: 0.85rem; color: #334155; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
+        <div class="alert alert-success" style="padding: 12px; margin-bottom: 16px;">
+          <div style="font-weight: 700; font-size: 0.75rem; color: var(--gov-navy); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;">
             AICTE Security Audit Verification Matrix:
           </div>
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; font-size: 0.85rem;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="color: ${checks.signature ? '#059669' : '#dc2626'}; font-weight: bold;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; font-size: 0.825rem;">
+            <div>
+              <span style="color: ${checks.signature ? 'var(--color-success)' : 'var(--color-danger)'}; font-weight: bold;">
                 ${checks.signature ? '✔' : '✖'}
               </span>
               <span>ECDSA P-256 Signature (${checks.signature ? 'Valid' : 'Failed'})</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="color: ${checks.sandbox ? '#059669' : '#b45309'}; font-weight: bold;">
+            <div>
+              <span style="color: ${checks.sandbox ? 'var(--color-success)' : 'var(--color-warning)'}; font-weight: bold;">
                 ${checks.sandbox ? '✔' : '▲'}
               </span>
-              <span>Sandbox APAAR Registry (${checks.sandbox ? 'Found' : 'Unregistered'})</span>
+              <span>Sandbox Registry (${checks.sandbox ? 'Found' : 'Unregistered'})</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="color: ${checks.ledgerRecord ? '#059669' : '#b45309'}; font-weight: bold;">
+            <div>
+              <span style="color: ${checks.ledgerRecord ? 'var(--color-success)' : 'var(--color-warning)'}; font-weight: bold;">
                 ${checks.ledgerRecord ? '✔' : '▲'}
               </span>
               <span>Ledger Anchor (${checks.ledgerRecord ? `Block #${outcome.ledgerBlockIndex}` : 'Not Anchored'})</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="color: ${checks.studentActive ? '#059669' : '#64748b'}; font-weight: bold;">
+            <div>
+              <span style="color: ${checks.studentActive ? 'var(--color-success)' : 'var(--text-muted)'}; font-weight: bold;">
                 ${checks.studentActive ? '✔' : '•'}
               </span>
               <span>Active Admission (${checks.studentActive ? 'Active' : 'Unconfirmed'})</span>
@@ -974,17 +1054,14 @@
 
         <!-- Decoded Certificate Data -->
         ${cert.apaarId ? `
-          <div style="font-size: 0.85rem; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden;">
-            <div style="background: #f1f5f9; padding: 8px 12px; font-weight: 700; color: #0f2942;">
-              Decoded Credential Payload
-            </div>
-            <table style="width: 100%; border-collapse: collapse;">
+          <div class="table-responsive">
+            <table class="data-table">
               <tbody>
-                <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 12px; color: #64748b; width: 140px;">Candidate Name</td><td style="padding: 8px 12px; font-weight: 600;">${cert.name || '-'}</td></tr>
-                <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 12px; color: #64748b;">APAAR ID</td><td style="padding: 8px 12px; font-family: monospace;">${cert.apaarId || '-'}</td></tr>
-                <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 12px; color: #64748b;">Roll Number</td><td style="padding: 8px 12px; font-family: monospace;">${cert.rollNo || '-'}</td></tr>
-                <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 12px; color: #64748b;">Institution</td><td style="padding: 8px 12px;">${cert.college || '-'}</td></tr>
-                <tr><td style="padding: 8px 12px; color: #64748b;">Issuance Timestamp</td><td style="padding: 8px 12px;">${cert.issuedAt ? new Date(cert.issuedAt).toLocaleString() : '-'}</td></tr>
+                <tr><td style="width: 160px; font-weight: 700; color: var(--text-muted);">Candidate Name</td><td style="font-weight: 700; color: var(--gov-navy-dark);">${cert.name || '-'}</td></tr>
+                <tr><td style="font-weight: 700; color: var(--text-muted);">APAAR ID</td><td class="font-mono font-bold">${cert.apaarId || '-'}</td></tr>
+                <tr><td style="font-weight: 700; color: var(--text-muted);">Roll Number</td><td class="font-mono">${cert.rollNo || '-'}</td></tr>
+                <tr><td style="font-weight: 700; color: var(--text-muted);">Institution</td><td>${cert.college || '-'}</td></tr>
+                <tr><td style="font-weight: 700; color: var(--text-muted);">Issuance Timestamp</td><td class="text-xs">${cert.issuedAt ? new Date(cert.issuedAt).toLocaleString() : '-'}</td></tr>
               </tbody>
             </table>
           </div>

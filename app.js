@@ -169,6 +169,9 @@
 
     const chain = window.Ledger.getChain();
     const verification = await window.Ledger.verifyChain();
+    const nodeStatus = verification.nodeStatus || (window.Ledger.getNodes ? window.Ledger.getNodes() : []);
+    const divergedNodes = Array.isArray(nodeStatus) ? nodeStatus.filter(n => n.status === 'diverged') : [];
+    const isDiverged = divergedNodes.length > 0;
 
     let blockFilter = container.getAttribute('data-filter') || 'ALL';
 
@@ -176,6 +179,16 @@
       if (blockFilter === 'ALL') return true;
       return blk.type === blockFilter;
     });
+
+    let statusPillClass = 'badge-success';
+    let statusPillText = '● LEDGER INTEGRITY: VALID';
+    if (!verification.valid) {
+      statusPillClass = 'badge-danger';
+      statusPillText = `▲ COMPROMISED AT BLOCK #${verification.brokenIndex}`;
+    } else if (isDiverged) {
+      statusPillClass = 'badge-warning';
+      statusPillText = '▲ 1 NODE DIVERGED - CONSENSUS HOLDS (2/3)';
+    }
 
     const html = `
       <div class="gov-card">
@@ -188,8 +201,8 @@
             </p>
           </div>
           <div class="header-action-pills">
-            <span class="badge ${verification.valid ? 'badge-success' : 'badge-danger'} font-mono">
-              ${verification.valid ? '● LEDGER INTEGRITY: VALID' : `▲ COMPROMISED AT BLOCK #${verification.brokenIndex}`}
+            <span class="badge ${statusPillClass} font-mono">
+              ${statusPillText}
             </span>
             <span class="badge badge-gov">Total Blocks: ${chain.length}</span>
           </div>
@@ -202,7 +215,7 @@
               🔍 Verify Cryptographic Chain
             </button>
             <button class="btn btn-warning btn-sm" id="btn-tamper-demo">
-              ⚡ Tamper Block #2 (Simulate Fraud)
+              ⚡ Tamper Node 2 (Validator-KA)
             </button>
             <button class="btn btn-danger btn-sm" id="btn-reset-demo">
               🔄 Reset Demo &amp; Ledger
@@ -228,6 +241,13 @@
               Block #${verification.brokenIndex} has been tampered! The computed SHA-256 digest does not match the stored cryptographic header, invalidating the hash chain.
             </div>
             <div class="text-xs text-red-800 mt-1 font-mono">${verification.reason || ''}</div>
+          </div>
+        ` : isDiverged ? `
+          <div class="alert alert-warning mt-4">
+            <div class="font-bold">⚠️ 1 Node Diverged - Consensus Holds (2/3)</div>
+            <div class="text-xs mt-1">
+              ${divergedNodes.map(n => n.name).join(', ')} has diverged from consensus. The Byzantine fault-tolerant ledger continues operating safely under 2/3 majority consensus.
+            </div>
           </div>
         ` : `
           <div class="alert alert-success mt-4">
@@ -296,7 +316,7 @@
 
     if (btnTamper) {
       btnTamper.addEventListener('click', () => {
-        window.Ledger.tamper(2);
+        window.Ledger.tamper(2, 'node-ka');
         renderLedgerTab();
         updateLedgerBadge();
       });
@@ -326,7 +346,7 @@
     singleTamperBtns.forEach(b => {
       b.addEventListener('click', (e) => {
         const idx = parseInt(e.target.getAttribute('data-index'), 10);
-        window.Ledger.tamper(idx);
+        window.Ledger.tamper(idx, 'node-ka');
         renderLedgerTab();
         updateLedgerBadge();
       });
@@ -358,14 +378,22 @@
     if (!badge || !window.Ledger) return;
 
     const res = await window.Ledger.verifyChain();
-    if (res.valid) {
-      badge.className = 'status-indicator status-valid';
-      badge.innerHTML = '● Ledger: VERIFIED';
-      badge.title = 'Simulated Permissioned Ledger SHA-256 chain is valid.';
-    } else {
+    const nodeStatus = res.nodeStatus || (window.Ledger.getNodes ? window.Ledger.getNodes() : []);
+    const divergedNodes = Array.isArray(nodeStatus) ? nodeStatus.filter(n => n.status === 'diverged') : [];
+    const isDiverged = divergedNodes.length > 0;
+
+    if (!res.valid) {
       badge.className = 'status-indicator status-compromised';
       badge.innerHTML = `▲ Ledger: BREACHED (#${res.brokenIndex})`;
-      badge.title = `Data tamper detected at block #${res.brokenIndex}.`;
+      badge.title = `Consensus failed: Data tamper detected at block #${res.brokenIndex}.`;
+    } else if (isDiverged) {
+      badge.className = 'status-indicator status-diverged';
+      badge.innerHTML = '▲ 1 NODE DIVERGED - CONSENSUS HOLDS (2/3)';
+      badge.title = `${divergedNodes.map(n => n.name).join(', ')} diverged. 2/3 majority consensus preserves ledger integrity.`;
+    } else {
+      badge.className = 'status-indicator status-valid';
+      badge.innerHTML = '● Ledger: VERIFIED';
+      badge.title = 'Simulated Permissioned Ledger SHA-256 chain is valid (3/3 Consensus).';
     }
   }
 

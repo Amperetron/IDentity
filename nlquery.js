@@ -3,27 +3,86 @@
  * Agent B - Shared Contract: window.NLQuery
  *
  * Capabilities:
- * - run(question) -> { rows, explanation }
- * - Fast, deterministic local keyword parsing engine (Zero external LLM / network calls)
- * - Recognizes:
- *   - State names (e.g. Maharashtra, Karnataka, Delhi, Tamil Nadu, Gujarat, Uttar Pradesh)
- *   - "NRI", "quota", "exceeded", "overflow", "breach"
- *   - "above N%", "> N%", "over N%"
- *   - "full", "capacity", "exhausted", "vacant", "available"
- *   - "anomaly", "anomalies", "flags", "fraud", "violations"
- *   - 12-digit APAAR IDs & student credential searches
- *   - "certificate", "credentials", "issued"
- * - Interactive UI with suggestion query chips, query explanation, and dynamic results table
+ * - Direct integration with window.Ledger, window.Rules, and window.Anomalies
+ *   Methods: Rules.getCollegeStats, Ledger.getChain, Anomalies.detect
+ * - run(question) -> { rows, explanation, source }
+ * - Dual Engine Architecture:
+ *   1. Real LLM Proxy via CONFIG.LLM_PROXY_URL (Cloudflare Worker POST {question})
+ *      -> Returns JSON filter {filters:[{field,op,value}], sort:{field,dir}}
+ *      -> Whitelist fields: name, state, intake, admitted, nriAdmitted, nriQuota, utilization
+ *      -> Whitelist ops: > < >= <= = contains
+ *      -> Strictly validates types and executes in JS on Rules.getCollegeStats()
+ *      -> Displays interpreted filter to user
+ *   2. Safe deterministic local keyword & regex parser fallback
+ *      -> Silently triggers on empty LLM_PROXY_URL, network error, invalid response, or 6s timeout
+ *      -> Result clearly labeled "Parsed locally"
+ * - Interactive UI with preset query chips, explanation banner, and responsive results table
+ * - NO API keys in any client file
  */
 
 (function () {
   'use strict';
 
-  // Fallback / Adapter for environment independence
+  // Strict field whitelist as mandated by contract
+  const WHITELIST_FIELDS = [
+    'name',
+    'state',
+    'intake',
+    'admitted',
+    'nriAdmitted',
+    'nriQuota',
+    'utilization'
+  ];
+
+  // Strict operator whitelist as mandated by contract
+  const WHITELIST_OPS = ['>', '<', '>=', '<=', '=', 'contains'];
+
+  // Normalization map for LLM field synonyms
+  const FIELD_SYNONYMS = {
+    'name': 'name',
+    'institution': 'name',
+    'collegename': 'name',
+    'college': 'name',
+    'state': 'state',
+    'intake': 'intake',
+    'totalintake': 'intake',
+    'capacity': 'intake',
+    'admitted': 'admitted',
+    'totaladmitted': 'admitted',
+    'admissions': 'admitted',
+    'nriadmitted': 'nriAdmitted',
+    'nri_admitted': 'nriAdmitted',
+    'nri': 'nriAdmitted',
+    'nriquota': 'nriQuota',
+    'nri_quota': 'nriQuota',
+    'quota': 'nriQuota',
+    'utilization': 'utilization',
+    'util': 'utilization',
+    'occupancy': 'utilization'
+  };
+
+  /**
+   * Safe accessor for window.CONFIG
+   */
+  function getConfig() {
+    return window.CONFIG || {
+      CONTRACT_ADDRESS: "",
+      CHAIN_ID: 11155111,
+      EXPLORER: "https://sepolia.etherscan.io",
+      LLM_PROXY_URL: ""
+    };
+  }
+
+  // Safe accessor for window.Ledger
   function getLedger() {
     return window.Ledger || {
       getChain: () => []
     };
+  }
+
+  // Safe accessor for window.Rules
+  function getRules() {
+    return window.Rules || null;
   }
 
   function getSeed() {
@@ -33,10 +92,15 @@
     };
   }
 
+  /**
+   * Derive college stats: calls window.Rules.getCollegeStats() directly,
+   * with fallback adapter deriving state from window.Ledger.getChain().
+   */
   function getCollegeStats() {
-    if (window.Rules && typeof window.Rules.getCollegeStats === 'function') {
+    const rules = getRules();
+    if (rules && typeof rules.getCollegeStats === 'function') {
       try {
-        const stats = window.Rules.getCollegeStats();
+        const stats = rules.getCollegeStats();
         if (Array.isArray(stats) && stats.length > 0) return stats;
       } catch (e) {
         console.warn('Rules.getCollegeStats failed in nlquery:', e);
@@ -91,25 +155,198 @@
   }
 
   /**
-   * Natural Language Query Parser & Executor
-   * Returns { rows: Array<Object>, explanation: string }
+   * Validate and sanitize a single filter object from LLM
+   * Whitelist fields: name, state, intake, admitted, nriAdmitted, nriQuota, utilization
+   * Whitelist ops: > < >= <= = contains
+   * Validate types: numeric fields must be Numbers, string fields must be Strings
    */
-  async function run(question) {
-    if (!question || typeof question !== 'string') {
-      return {
-        rows: [],
-        explanation: 'Please enter a valid natural language query.'
-      };
+  function validateFilterItem(item) {
+    if (!item || typeof item !== 'object') return null;
+
+    // Field normalization & validation
+    const rawField = String(item.field || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const field = FIELD_SYNONYMS[rawField];
+    if (!field || !WHITELIST_FIELDS.includes(field)) {
+      return null;
     }
 
+    // Operator normalization & validation
+    let op = String(item.op || '').trim().toLowerCase();
+    if (op === '==' || op === '===') op = '=';
+    if (op === 'includes' || op === 'include' || op === 'like') op = 'contains';
+    if (!WHITELIST_OPS.includes(op)) {
+      return null;
+    }
+
+    // Type validation
+    const isNumericField = ['intake', 'admitted', 'nriAdmitted', 'nriQuota', 'utilization'].includes(field);
+
+    if (isNumericField) {
+      if (op === 'contains') return null; // contains is invalid for numbers
+      let num = Number(String(item.value).replace('%', '').trim());
+      if (isNaN(num)) return null;
+
+      // Handle fractional utilization (e.g. 0.9 for 90%)
+      if (field === 'utilization' && num > 0 && num <= 1) {
+        num = num * 100;
+      }
+      return { field, op, value: num, type: 'number' };
+    } else {
+      // String fields (name, state)
+      if (op !== '=' && op !== 'contains') return null;
+      const strVal = String(item.value !== undefined ? item.value : '').trim();
+      if (!strVal) return null;
+      return { field, op, value: strVal, type: 'string' };
+    }
+  }
+
+  /**
+   * Validate sort definition from LLM
+   */
+  function validateSort(sort) {
+    if (!sort || typeof sort !== 'object' || !sort.field) return null;
+    const rawField = String(sort.field).toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const field = FIELD_SYNONYMS[rawField];
+    if (!field || !WHITELIST_FIELDS.includes(field)) return null;
+    const dir = String(sort.dir || 'asc').toLowerCase() === 'desc' ? 'desc' : 'asc';
+    return { field, dir };
+  }
+
+  /**
+   * Execute real LLM Query via Cloudflare Worker proxy
+   * POST { question } -> { filters: [{field, op, value}], sort: {field, dir} }
+   * Enforces 6s timeout, whitelists, type safety, and executes in JS on Rules.getCollegeStats()
+   */
+  async function runLLM(question) {
+    const config = getConfig();
+    if (!config.LLM_PROXY_URL || !config.LLM_PROXY_URL.trim()) {
+      throw new Error('LLM_PROXY_URL_EMPTY');
+    }
+
+    // 6-second timeout via AbortController
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+    let response;
+    try {
+      response = await fetch(config.LLM_PROXY_URL.trim(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question }),
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (!response.ok) {
+      throw new Error(`LLM Proxy returned HTTP ${response.status}`);
+    }
+
+    const json = await response.json();
+    const filterData = json.filters ? json : (json.data && json.data.filters ? json.data : null);
+
+    if (!filterData || !Array.isArray(filterData.filters)) {
+      throw new Error('Invalid JSON filter structure from proxy');
+    }
+
+    // Validate and sanitize each filter
+    const validatedFilters = [];
+    for (const f of filterData.filters) {
+      const valid = validateFilterItem(f);
+      if (valid) validatedFilters.push(valid);
+    }
+
+    if (validatedFilters.length === 0) {
+      throw new Error('No valid whitelisted filters in LLM response');
+    }
+
+    const validatedSort = validateSort(filterData.sort);
+
+    // Apply filters in JS to Rules.getCollegeStats()
+    const stats = getCollegeStats();
+    let filtered = stats.filter(row => {
+      return validatedFilters.every(f => {
+        const cell = row[f.field];
+        if (f.type === 'number') {
+          const cNum = Number(cell);
+          if (f.op === '>') return cNum > f.value;
+          if (f.op === '>=') return cNum >= f.value;
+          if (f.op === '<') return cNum < f.value;
+          if (f.op === '<=') return cNum <= f.value;
+          if (f.op === '=') return cNum === f.value;
+          return false;
+        } else {
+          const cStr = String(cell || '').toLowerCase();
+          const tStr = String(f.value).toLowerCase();
+          if (f.op === 'contains') return cStr.includes(tStr);
+          if (f.op === '=') return cStr === tStr;
+          return false;
+        }
+      });
+    });
+
+    // Apply sort if present
+    if (validatedSort) {
+      const mult = validatedSort.dir === 'desc' ? -1 : 1;
+      filtered.sort((a, b) => {
+        const valA = a[validatedSort.field];
+        const valB = b[validatedSort.field];
+        if (typeof valA === 'number' && typeof valB === 'number') {
+          return (valA - valB) * mult;
+        }
+        return String(valA || '').localeCompare(String(valB || '')) * mult;
+      });
+    }
+
+    // Format display rows
+    const rows = filtered.map(s => {
+      const utilFrac = s.utilization > 1 ? s.utilization / 100 : s.utilization;
+      const isNriOver = s.nriAdmitted > s.nriQuota;
+      let comp = 'COMPLIANT';
+      if (isNriOver) comp = 'NRI QUOTA BREACH';
+      else if (utilFrac >= 0.95 || s.admitted >= s.intake) comp = 'CAPACITY CRITICAL';
+
+      return {
+        'College ID': s.collegeId,
+        'Institution': s.name,
+        'State': s.state,
+        'Total Intake': s.intake,
+        'Admitted': s.admitted,
+        'Utilization': `${(utilFrac * 100).toFixed(1)}%`,
+        'NRI Admitted': `${s.nriAdmitted} / ${s.nriQuota}`,
+        'Compliance': comp
+      };
+    });
+
+    // Format interpreted filter explanation
+    const filterDescriptions = validatedFilters.map(f => {
+      return `${f.field} ${f.op} ${typeof f.value === 'string' ? `"${f.value}"` : f.value}`;
+    }).join(' AND ');
+
+    const sortDescription = validatedSort ? ` &bull; Sorted by: ${validatedSort.field} (${validatedSort.dir})` : '';
+    const explanation = `Interpreted filter: [${filterDescriptions}]${sortDescription} &bull; Matched ${rows.length} institution(s)`;
+
+    return {
+      rows,
+      explanation,
+      source: 'LLM',
+      filter: validatedFilters,
+      sort: validatedSort
+    };
+  }
+
+  /**
+   * Deterministic local keyword and regex query parser
+   * Safe fallback engine used whenever LLM proxy is unavailable, times out, or unconfigured
+   */
+  async function runLocal(question) {
     const q = question.trim().toLowerCase();
     const stats = getCollegeStats();
     const chain = getLedger().getChain();
     const seed = getSeed();
 
-    // -----------------------------------------------------------------
-    // 1. Query: Anomalies / Flags / Fraud
-    // -----------------------------------------------------------------
+    // 1. Anomalies / Flags / Fraud
     if (q.includes('anomaly') || q.includes('anomalies') || q.includes('flag') || q.includes('fraud') || q.includes('violation')) {
       let anomalies = [];
       if (window.Anomalies && typeof window.Anomalies.detect === 'function') {
@@ -117,7 +354,6 @@
       } else if (window.Anomalies && typeof window.Anomalies.getAnomalies === 'function') {
         anomalies = window.Anomalies.getAnomalies();
       } else {
-        // Fallback scan from ledger FLAG blocks
         chain.forEach(b => {
           if (b.type === 'FLAG' && b.data) anomalies.push(b.data);
         });
@@ -133,13 +369,12 @@
 
       return {
         rows,
-        explanation: `Identified ${rows.length} active risk anomalies and compliance flags recorded across institutions.`
+        explanation: `Identified ${rows.length} active risk anomalies and compliance flags recorded across institutions.`,
+        source: 'LOCAL'
       };
     }
 
-    // -----------------------------------------------------------------
-    // 2. Query: Certificates / Credentials
-    // -----------------------------------------------------------------
+    // 2. Certificates / Credentials
     if (q.includes('certificate') || q.includes('credential') || q.includes('issued')) {
       const certBlocks = chain.filter(b => b.type === 'CERTIFICATE' && b.data);
       const rows = certBlocks.map(b => {
@@ -156,13 +391,12 @@
 
       return {
         rows,
-        explanation: `Found ${rows.length} cryptographically signed credentials committed to the simulated ledger.`
+        explanation: `Found ${rows.length} cryptographically signed credentials committed to the simulated ledger.`,
+        source: 'LOCAL'
       };
     }
 
-    // -----------------------------------------------------------------
-    // 3. Query: Student APAAR ID Search (12-digit number)
-    // -----------------------------------------------------------------
+    // 3. Student APAAR ID Search (12-digit number)
     const apaarMatch = q.match(/\b\d{12}\b/);
     if (apaarMatch) {
       const searchId = apaarMatch[0];
@@ -180,13 +414,12 @@
 
       return {
         rows,
-        explanation: `Retrieved ${rows.length} ledger event(s) for Sandbox APAAR ID ${searchId}${profile ? ` (${profile.name})` : ''}.`
+        explanation: `Retrieved ${rows.length} ledger event(s) for Sandbox APAAR ID ${searchId}${profile ? ` (${profile.name})` : ''}.`,
+        source: 'LOCAL'
       };
     }
 
-    // -----------------------------------------------------------------
     // 4. Institutional Query Filters (State, NRI, Utilization)
-    // -----------------------------------------------------------------
     let filtered = [...stats];
     const explanations = [];
 
@@ -207,12 +440,11 @@
       explanations.push(`located in ${matchedState.charAt(0).toUpperCase() + matchedState.slice(1)}`);
     }
 
-    // Filter B: NRI Exceeded / Quota Breach / Overflow
+    // Filter B: NRI Exceeded / Quota Breach
     const isNriExceeded = (q.includes('nri') || q.includes('quota')) &&
       (q.includes('exceed') || q.includes('overflow') || q.includes('breach') || q.includes('over') || q.includes('violation'));
     const isNriGeneral = q.includes('nri') && !isNriExceeded;
 
-    // Scan chain for any college flagged for NRI overflow/attempts
     const nriFlaggedColleges = new Set();
     chain.forEach(b => {
       if (b.type === 'FLAG' && b.data && b.data.collegeId) {
@@ -225,10 +457,10 @@
 
     if (isNriExceeded) {
       filtered = filtered.filter(s => s.nriAdmitted > s.nriQuota || nriFlaggedColleges.has(s.collegeId.toLowerCase()));
-      explanations.push('exceeding approved NRI quota or flagged for NRI overflow attempts');
+      explanations.push('exceeding approved NRI quota');
     } else if (isNriGeneral) {
       filtered = filtered.filter(s => s.nriAdmitted > 0 || nriFlaggedColleges.has(s.collegeId.toLowerCase()));
-      explanations.push('with active NRI admissions or NRI quota requests');
+      explanations.push('with active NRI admissions');
     }
 
     // Filter C: Utilization Percentage Filter ("above N%", "> N%", "over N%")
@@ -251,7 +483,6 @@
       explanations.push('with available vacant seats');
     }
 
-    // Convert filtered stats to display rows
     const rows = filtered.map(s => {
       const util = s.utilization > 1 ? s.utilization / 100 : s.utilization;
       const isFlagged = nriFlaggedColleges.has(s.collegeId.toLowerCase());
@@ -278,7 +509,45 @@
 
     return {
       rows,
-      explanation: explanationText
+      explanation: explanationText,
+      source: 'LOCAL'
+    };
+  }
+
+  /**
+   * Primary Entry Point: run(question)
+   * Dispatches to Real LLM with Safe Fallback:
+   * 1. If CONFIG.LLM_PROXY_URL is configured, attempts LLM proxy POST {question} (6s timeout)
+   * 2. On any error, timeout, or empty URL, silently falls back to keyword parser
+   * 3. Result labeled "Parsed locally" on fallback
+   */
+  async function run(question) {
+    if (!question || typeof question !== 'string') {
+      return {
+        rows: [],
+        explanation: 'Please enter a valid natural language query.',
+        source: 'LOCAL'
+      };
+    }
+
+    const config = getConfig();
+    const hasProxy = Boolean(config.LLM_PROXY_URL && config.LLM_PROXY_URL.trim());
+
+    if (hasProxy) {
+      try {
+        return await runLLM(question);
+      } catch (err) {
+        // Silently fall back to local parser
+        console.info('LLM proxy request fallback to local parser:', err.message);
+      }
+    }
+
+    // Local parser fallback execution
+    const localRes = await runLocal(question);
+    return {
+      ...localRes,
+      explanation: `Parsed locally: ${localRes.explanation}`,
+      source: 'LOCAL'
     };
   }
 
@@ -289,55 +558,75 @@
     const container = document.getElementById('tab-query');
     if (!container) return;
 
+    const config = getConfig();
+    const hasProxy = Boolean(config.LLM_PROXY_URL && config.LLM_PROXY_URL.trim());
+
     container.innerHTML = `
-      <div class="nlquery-root" style="max-width: 1000px; margin: 0 auto; padding: 12px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
-        
+      <div class="gov-card">
         <!-- Header Banner -->
-        <div style="background: linear-gradient(135deg, #0f2942 0%, #1e4976 100%); color: #ffffff; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
-          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-            <div>
-              <h2 style="margin: 0; font-size: 1.4rem; font-weight: 700;">AICTE Natural Language Query Engine</h2>
-              <p style="margin: 6px 0 0; opacity: 0.9; font-size: 0.85rem;">
-                Deterministic Local Rule & Semantic Keyword Parser • Zero Latency • No External LLM Calls
-              </p>
-            </div>
-            <span style="background: #2563eb; color: #fff; padding: 4px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 600;">
-              Local Keyword Engine
+        <div class="gov-card-header" style="flex-wrap: wrap;">
+          <div>
+            <div class="brand-sup">AICTE Policy Intelligence</div>
+            <h2 class="gov-card-title mt-1">Natural Language Query Engine</h2>
+            <p class="gov-card-subtitle">
+              Query institutional capacity, NRI quotas, and ledger records with real LLM proxy and automatic safe local keyword fallback.
+            </p>
+          </div>
+          <div class="header-action-pills" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <span id="nlquery-proxy-badge" class="badge ${hasProxy ? 'badge-primary' : 'badge-gov'} font-mono">
+              ${hasProxy ? 'LLM Proxy: Active' : 'Engine: Local / Fallback Ready'}
             </span>
+            <button class="btn btn-outline btn-xs font-mono" id="btn-toggle-proxy-settings">
+              ⚙️ Proxy Settings
+            </button>
+          </div>
+        </div>
+
+        <!-- Optional Proxy Settings Dropdown -->
+        <div id="proxy-settings-card" style="display: none; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 12px; margin-bottom: 16px;">
+          <div style="font-size: 0.8rem; font-weight: 700; color: var(--gov-navy); margin-bottom: 4px;">
+            Cloudflare Worker LLM Proxy Endpoint
+          </div>
+          <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;">
+            Worker accepts POST {question} and returns {filters:[{field,op,value}], sort:{field,dir}}. Zero API keys stored on client.
+          </div>
+          <div style="display: flex; gap: 6px;">
+            <input type="text" id="nlquery-proxy-input" value="${config.LLM_PROXY_URL || ''}" placeholder="https://<worker-subdomain>.workers.dev" class="form-select font-mono text-xs" style="flex: 1; padding: 6px 10px;" />
+            <button class="btn btn-primary btn-xs" id="btn-save-proxy-url">Save</button>
           </div>
         </div>
 
         <!-- Query Input Section -->
-        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px;">
+        <div class="results-card mb-6">
           <div style="display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap;">
-            <input type="text" id="nlquery-input" placeholder='Ask AICTE engine: e.g. "Colleges in Maharashtra above 90%", "Colleges exceeding NRI quota", "Show all anomalies"' style="flex: 1; min-width: 280px; padding: 12px 16px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.95rem; box-sizing: border-box;" />
-            <button id="btn-nlquery-run" style="padding: 12px 24px; background: #0f2942; color: #ffffff; border: none; border-radius: 6px; font-weight: 700; font-size: 0.95rem; cursor: pointer; transition: background 0.2s;">
+            <input type="text" id="nlquery-input" placeholder='Ask AICTE engine: e.g. "Colleges in Maharashtra above 90%", "Colleges exceeding NRI quota", "Show all anomalies"' class="form-select" style="flex: 1; min-width: 280px; padding: 10px 14px; font-size: 0.95rem;" />
+            <button id="btn-nlquery-run" class="btn btn-primary" style="padding: 10px 20px;">
               Run Query
             </button>
           </div>
 
           <!-- Quick Suggestion Query Chips -->
           <div>
-            <div style="font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 8px;">
+            <div class="text-xs font-semibold text-gov-navy uppercase tracking-wider mb-2">
               Quick Search Presets (Click to Execute):
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;" id="nlquery-preset-chips">
-              <button class="nl-chip" data-query="Colleges with utilization above 90%" style="background: #f1f5f9; border: 1px solid #cbd5e1; color: #334155; padding: 5px 10px; border-radius: 16px; font-size: 0.8rem; cursor: pointer;">
+              <button class="btn btn-outline btn-xs nl-chip" data-query="Colleges with utilization above 90%">
                 🎯 Above 90% utilization
               </button>
-              <button class="nl-chip" data-query="Colleges exceeding NRI quota" style="background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; padding: 5px 10px; border-radius: 16px; font-size: 0.8rem; cursor: pointer;">
+              <button class="btn btn-danger btn-xs nl-chip" data-query="Colleges exceeding NRI quota">
                 ⚠️ Colleges exceeding NRI quota
               </button>
-              <button class="nl-chip" data-query="Show all detected anomalies" style="background: #fffbeb; border: 1px solid #fde68a; color: #92400e; padding: 5px 10px; border-radius: 16px; font-size: 0.8rem; cursor: pointer;">
+              <button class="btn btn-warning btn-xs nl-chip" data-query="Show all detected anomalies">
                 🚨 Show all detected anomalies
               </button>
-              <button class="nl-chip" data-query="Colleges in Maharashtra" style="background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 5px 10px; border-radius: 16px; font-size: 0.8rem; cursor: pointer;">
+              <button class="btn btn-outline btn-xs nl-chip" data-query="Colleges in Maharashtra">
                 📍 Colleges in Maharashtra
               </button>
-              <button class="nl-chip" data-query="Colleges in Karnataka above 80%" style="background: #f1f5f9; border: 1px solid #cbd5e1; color: #334155; padding: 5px 10px; border-radius: 16px; font-size: 0.8rem; cursor: pointer;">
+              <button class="btn btn-outline btn-xs nl-chip" data-query="Colleges in Karnataka above 80%">
                 ⚡ Karnataka above 80%
               </button>
-              <button class="nl-chip" data-query="List all issued certificates" style="background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; padding: 5px 10px; border-radius: 16px; font-size: 0.8rem; cursor: pointer;">
+              <button class="btn btn-success btn-xs nl-chip" data-query="List all issued certificates">
                 📜 Issued certificates
               </button>
             </div>
@@ -345,19 +634,19 @@
         </div>
 
         <!-- Query Output Container -->
-        <div id="nlquery-output-box" style="display: none; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+        <div id="nlquery-output-box" style="display: none;" class="results-card">
           <!-- Explanation Header -->
-          <div style="background: #f8fafc; border-left: 4px solid #2563eb; padding: 12px 16px; border-radius: 4px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+          <div class="alert alert-success" style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
             <div>
-              <div style="font-size: 0.75rem; text-transform: uppercase; font-weight: 700; color: #2563eb; letter-spacing: 0.5px;">Engine Interpretation</div>
-              <div id="nlquery-explanation-text" style="font-size: 0.95rem; font-weight: 600; color: #1e293b; margin-top: 2px;"></div>
+              <div class="font-mono" style="font-size: 0.72rem; text-transform: uppercase; font-weight: 700; color: var(--gov-navy); letter-spacing: 0.5px;">Engine Interpretation</div>
+              <div id="nlquery-explanation-text" style="font-size: 0.9rem; font-weight: 600; color: var(--text-main); margin-top: 2px;"></div>
             </div>
-            <span id="nlquery-result-count" style="background: #0f2942; color: #ffffff; font-size: 0.75rem; font-weight: 700; padding: 4px 10px; border-radius: 12px;"></span>
+            <span id="nlquery-result-count" class="badge badge-primary font-mono font-bold"></span>
           </div>
 
           <!-- Dynamic Results Table -->
-          <div style="overflow-x: auto;">
-            <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
+          <div class="table-responsive">
+            <table class="data-table">
               <thead id="nlquery-table-thead"></thead>
               <tbody id="nlquery-table-tbody"></tbody>
             </table>
@@ -376,6 +665,31 @@
     const thead = document.getElementById('nlquery-table-thead');
     const tbody = document.getElementById('nlquery-table-tbody');
 
+    // Proxy settings toggles
+    const btnToggleSettings = document.getElementById('btn-toggle-proxy-settings');
+    const settingsCard = document.getElementById('proxy-settings-card');
+    const btnSaveProxy = document.getElementById('btn-save-proxy-url');
+    const proxyInput = document.getElementById('nlquery-proxy-input');
+
+    if (btnToggleSettings && settingsCard) {
+      btnToggleSettings.addEventListener('click', () => {
+        settingsCard.style.display = settingsCard.style.display === 'none' ? 'block' : 'none';
+      });
+    }
+
+    if (btnSaveProxy && proxyInput) {
+      btnSaveProxy.addEventListener('click', () => {
+        const val = proxyInput.value.trim();
+        if (window.CONFIG && typeof window.CONFIG.save === 'function') {
+          window.CONFIG.save({ LLM_PROXY_URL: val });
+        } else if (window.CONFIG) {
+          window.CONFIG.LLM_PROXY_URL = val;
+        }
+        alert('LLM Proxy URL updated: ' + (val || '(cleared)'));
+        render();
+      });
+    }
+
     async function executeQuery(text) {
       if (!text || !text.trim()) return;
 
@@ -385,23 +699,30 @@
       try {
         const result = await run(text);
         outputBox.style.display = 'block';
-        expText.textContent = result.explanation;
+
+        // Render explanation with source label
+        if (result.source === 'LLM') {
+          expText.innerHTML = `<span class="badge badge-primary font-mono" style="margin-right: 6px;">LLM Filter</span> ${result.explanation}`;
+        } else {
+          expText.innerHTML = `<span class="badge badge-gov font-mono" style="margin-right: 6px;">Parsed locally</span> ${result.explanation.replace('Parsed locally: ', '')}`;
+        }
+
         countBadge.textContent = `${result.rows.length} Result${result.rows.length === 1 ? '' : 's'}`;
 
         if (result.rows.length === 0) {
           thead.innerHTML = '';
-          tbody.innerHTML = `<tr><td style="padding: 24px; text-align: center; color: #94a3b8;">No matching records found for this query. Try one of the preset chips above.</td></tr>`;
+          tbody.innerHTML = `<tr><td style="padding: 24px; text-align: center; color: var(--text-muted);">No matching records found for this query. Try one of the preset chips above.</td></tr>`;
         } else {
           // Dynamic columns based on row keys
           const headers = Object.keys(result.rows[0]);
           thead.innerHTML = `
-            <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0; color: #475569;">
-              ${headers.map(h => `<th style="padding: 10px 12px;">${h}</th>`).join('')}
+            <tr>
+              ${headers.map(h => `<th>${h}</th>`).join('')}
             </tr>
           `;
 
           tbody.innerHTML = result.rows.map(row => `
-            <tr style="border-bottom: 1px solid #f1f5f9;">
+            <tr>
               ${headers.map(h => {
                 const val = row[h];
                 let cellContent = val;
@@ -409,11 +730,10 @@
                 if (h === 'Compliance' || h === 'Severity') {
                   const isBad = String(val).includes('BREACH') || String(val).includes('HIGH') || String(val).includes('ALERT');
                   const isWarn = String(val).includes('CRITICAL') || String(val).includes('MED');
-                  const bg = isBad ? '#fee2e2' : isWarn ? '#fef3c7' : '#ecfdf5';
-                  const textCol = isBad ? '#991b1b' : isWarn ? '#92400e' : '#065f46';
-                  cellContent = `<span style="background: ${bg}; color: ${textCol}; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.75rem;">${val}</span>`;
+                  const badgeClass = isBad ? 'badge-danger' : isWarn ? 'badge-warning' : 'badge-success';
+                  cellContent = `<span class="badge ${badgeClass}">${val}</span>`;
                 }
-                return `<td style="padding: 10px 12px;">${cellContent}</td>`;
+                return `<td>${cellContent}</td>`;
               }).join('')}
             </tr>
           `).join('');
@@ -457,7 +777,11 @@
   window.NLQuery = {
     init,
     run,
-    render
+    render,
+    runLLM,
+    runLocal,
+    validateFilterItem,
+    validateSort
   };
 
 })();

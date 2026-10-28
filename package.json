@@ -1,0 +1,13 @@
+{
+  "name": "aicte-apaar-platform",
+  "version": "1.0.0",
+  "description": "AICTE APAAR Unified Admission & Credential Platform with Multi-Node Permissioned Ledger and Vercel Serverless Backend",
+  "main": "api/blocks.js",
+  "private": true,
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
