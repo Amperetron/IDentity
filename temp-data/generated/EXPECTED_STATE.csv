@@ -1,0 +1,29 @@
+collegeId,name,state,intake,admitted,nriQuota,nriAdmitted,utilization_pct
+GJ-SVIT-01,Ahmedabad SVIT Institute of Technology,Gujarat,12,12,2,1,100.0
+GJ-NRIT-01,Surat NRIT Institute of Technology,Gujarat,12,12,2,1,100.0
+GJ-SBIT-01,Vadodara SBIT Institute of Technology,Gujarat,12,11,2,1,91.7
+RJ-MRWR-01,Jaipur MRWR Institute of Technology,Rajasthan,15,15,3,1,100.0
+RJ-MEWR-01,Jodhpur MEWR Institute of Technology,Rajasthan,15,15,3,1,100.0
+RJ-ARVL-01,Udaipur ARVL Institute of Technology,Rajasthan,15,2,3,0,13.3
+WB-HGHL-01,Kolkata HGHL Institute of Technology,West Bengal,30,20,3,3,66.7
+WB-DGPR-01,Durgapur DGPR Institute of Technology,West Bengal,24,10,4,1,41.7
+KL-MLBR-01,Kochi MLBR Institute of Technology,Kerala,36,22,6,6,61.1
+KL-PRYR-01,Thiruvananthapuram PRYR Institute of Technology,Kerala,30,13,4,1,43.3
+AP-GDVR-01,Vijayawada GDVR Institute of Technology,Andhra Pradesh,20,19,3,3,95.0
+AP-KRSN-01,Visakhapatnam KRSN Institute of Technology,Andhra Pradesh,18,7,2,1,38.9
+MP-VNDH-01,Indore VNDH Institute of Technology,Madhya Pradesh,24,15,2,2,62.5
+MP-BNDL-01,Bhopal BNDL Institute of Technology,Madhya Pradesh,24,14,4,1,58.3
+OD-KLNG-01,Bhubaneswar KLNG Institute of Technology,Odisha,40,26,4,1,65.0
+OD-CHLK-01,Cuttack CHLK Institute of Technology,Odisha,24,4,4,0,16.7
+PB-STLJ-01,Ludhiana STLJ Institute of Technology,Punjab,18,13,2,1,72.2
+PB-BEAS-01,Amritsar BEAS Institute of Technology,Punjab,15,6,2,1,40.0
+HR-YMNA-01,Gurugram YMNA Institute of Technology,Haryana,20,15,2,1,75.0
+HR-HRYN-01,Panipat HRYN Institute of Technology,Haryana,20,8,3,1,40.0
+BR-MGDH-01,Patna MGDH Institute of Technology,Bihar,12,4,1,0,33.3
+BR-VKRM-01,Gaya VKRM Institute of Technology,Bihar,12,0,2,0,0.0
+KA-MYSR-01,Mysuru MYSR Institute of Technology,Karnataka,15,14,2,2,93.3
+KA-BLGV-01,Belagavi BLGV Institute of Technology,Karnataka,20,15,3,1,75.0
+KA-HBLI-01,Hubballi HBLI Institute of Technology,Karnataka,20,8,3,0,40.0
+MH-DCCN-01,Nashik DCCN Institute of Technology,Maharashtra,18,17,2,1,94.4
+MH-SHYD-01,Aurangabad SHYD Institute of Technology,Maharashtra,24,16,4,1,66.7
+MH-KNKM-01,Nagpur KNKM Institute of Technology,Maharashtra,18,3,3,0,16.7
